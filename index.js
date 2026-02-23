@@ -19,8 +19,9 @@ const config = {
     discordGuildId: "1460573383518322770",
     discordAppId: "1463169413485428747",
     faucets: [
-        { name: "USDC", channelId: "1463389945225023629", customId: "claim_tusdc" },
-        { name: "USDT", channelId: "1463389902170492961", customId: "claim_tusdt" }
+        { name: "BNB", channelId: "1463389834239414415", customId: "claim_bnb" },
+        { name: "USDC", channelId: "1471443448933519370", customId: "claim_s1tusdc" },
+        { name: "USDT", channelId: "1471443514490490892", customId: "claim_s1tusdt" }
     ]
 };
 
