@@ -1,12 +1,14 @@
 [
   {
-    "privateKey": "PRIVATE_KEY_METAMASK_MU",
+    "privateKey": "your-private-key-1",
+    "discordToken": "your-discord-token-1",
     "proxy": "http://user:pass@ip:port",
-    "discordToken": "YOUR_DISCORD_TOKEN_HERE"
+    "duelEnabled": true
   },
   {
-    "privateKey": "PRIVATE_KEY_AKUN_KEDUA",
-    "proxy": null,
-    "discordToken": "YOUR_DISCORD_TOKEN_HERE"
+    "privateKey": "your-private-key-2",
+    "discordToken": "your-discord-token-2",
+    "proxy": "null",
+    "duelEnabled": true
   }
 ]
