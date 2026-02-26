@@ -62,9 +62,7 @@ try {
         if (configData.grokApiKey) {
             config.grokApiKey = configData.grokApiKey;
         }
-    } catch (e) {
-        console.log(chalk.yellow('⚠️ config.json not found, using default settings'));
-    }
+    } catch (e) {}
 } catch (e) {
     console.log(chalk.red('❌ Error loading accounts.json'));
     process.exit(1);
@@ -77,9 +75,7 @@ if (config.useGroq && config.grokApiKey) {
             apiKey: config.grokApiKey,
         });
         console.log(chalk.green('✅ Groq AI initialized successfully'));
-    } catch (e) {
-        console.log(chalk.yellow(`⚠️ Groq initialization failed: ${e.message}`));
-    }
+    } catch (e) {}
 }
 
 const RPC_URLS = [
@@ -612,6 +608,36 @@ async function claimDiscordFaucet(account, idx) {
     return claimed > 0;
 }
 
+function analyzeQuizQuestion(question, options) {
+    const q = (question || '').toLowerCase();
+    const opts = (options || []).map(o => (o || '').toLowerCase());
+
+    const patterns = [
+        { keywords: ['what does liquidity refer', 'liquidity refer'], answer: opts.findIndex(o => o.includes('easily') && o.includes('bought or sold')) },
+        { keywords: ['highly liquid market'], answer: opts.findIndex(o => o.includes('tight') && o.includes('spread')) },
+        { keywords: ['defi', 'who', 'provides liquidity', 'typically provides'], answer: opts.findIndex(o => o.includes('regular users') || o.includes('liquidity pools')) },
+        { keywords: ['powers trading', 'without', 'order book'], answer: opts.findIndex(o => o.includes('automated market') || o.includes('amm')) },
+        { keywords: ['not commonly used', 'not', 'measure liquidity'], answer: opts.findIndex(o => o.includes('block') || o.includes('confirmation')) },
+        { keywords: ['impermanent loss'], answer: opts.findIndex(o => o.includes('temporary') || o.includes('diverge')) },
+        { keywords: ['tvl', 'total value locked'], answer: opts.findIndex(o => o.includes('total') && o.includes('locked')) },
+        { keywords: ['slippage'], answer: opts.findIndex(o => o.includes('expected') && o.includes('actual') || o.includes('difference')) },
+        { keywords: ['yield farming'], answer: opts.findIndex(o => o.includes('earn') && o.includes('reward') || o.includes('staking')) },
+    ];
+
+    for (const p of patterns) {
+        if (p.keywords.some(k => q.includes(k)) && p.answer >= 0) {
+            return p.answer;
+        }
+    }
+
+    let bestIdx = 0;
+    let bestLen = 0;
+    opts.forEach((o, i) => {
+        if (o.length > bestLen) { bestLen = o.length; bestIdx = i; }
+    });
+    return bestIdx;
+}
+
 async function fetchS1Quiz(client) {
     try {
         const today = new Date().toISOString().split('T')[0];
@@ -641,7 +667,7 @@ async function checkQuizCompleted(client, addressLower) {
         const today = new Date().toISOString().split('T')[0];
         const res = await client.get(`/rest/v1/s1_daily_quiz_attempts`, {
             params: {
-                select: 'score_percent,liq_earned,correct_count,total_questions',
+                select: 'score_percent,liq_earned,correct_count,total_questions,answers',
                 wallet_address: `eq.${addressLower}`,
                 quiz_date: `eq.${today}`
             }
@@ -725,15 +751,19 @@ async function processDailyQuiz(account, idx) {
                         console.log(chalk.green(`[Acc ${idx + 1}] 🤖 Suggests: ${answer}`));
                         answers.push(answer);
                     } else {
-                        console.log(chalk.yellow(`[Acc ${idx + 1}] ⚠️ Groq returned invalid answer, using 1`));
-                        answers.push(1);
+                        const fallback = analyzeQuizQuestion(quizItem.question, optionsArray);
+                        console.log(chalk.yellow(`[Acc ${idx + 1}] ⚠️ Groq returned invalid, using analyzer: ${fallback}`));
+                        answers.push(fallback);
                     }
                 } catch (groqError) {
-                    console.log(chalk.yellow(`[Acc ${idx + 1}] ⚠️ Groq error: ${groqError.message}`));
-                    answers.push(1);
+                    const fallback = analyzeQuizQuestion(quizItem.question, optionsArray);
+                    console.log(chalk.yellow(`[Acc ${idx + 1}] ⚠️ Groq error, using analyzer: ${fallback}`));
+                    answers.push(fallback);
                 }
             } else {
-                answers.push(1);
+                const answer = analyzeQuizQuestion(quizItem.question, optionsArray);
+                console.log(chalk.cyan(`[Acc ${idx + 1}] 📊 Analyzer suggests: ${answer}`));
+                answers.push(answer);
             }
             await sleep(2000);
         }
@@ -743,10 +773,18 @@ async function processDailyQuiz(account, idx) {
 
     try {
         await sleep(antiDetect.requestJitter());
-        const res = await client.post('/functions/v1/submit-s1-quiz', {
-            wallet_address: addressLower,
-            answers: answers
-        });
+        
+        const res = await client.post('/functions/v1/submit-s1-quiz', 
+            {
+                wallet_address: addressLower,
+                answers: answers
+            },
+            {
+                headers: {
+                    'x-wallet-address': addressLower
+                }
+            }
+        );
 
         console.log(chalk.gray(`[Acc ${idx + 1}] Quiz Response: ${JSON.stringify(res.data)}`));
 
@@ -804,9 +842,12 @@ async function processGovernanceVote(account, idx) {
     const ROUND_ID = 1;
     const POOLS = [0, 1, 2, 3];
     let voteCount = 0;
+    let notEligibleCount = 0;
 
-    for (let i = 0; i < 5; i++) {
-        const poolId = POOLS[Math.floor(Math.random() * POOLS.length)];
+    const votePlan = [0, 1, 2, POOLS[Math.floor(Math.random() * POOLS.length)], POOLS[Math.floor(Math.random() * POOLS.length)]];
+
+    for (let i = 0; i < votePlan.length; i++) {
+        const poolId = votePlan[i];
         const poolName = ['Pool A', 'Pool B', 'Pool C', 'Pool D'][poolId];
 
         console.log(chalk.cyan(`[Acc ${idx + 1}] Governance vote ${i + 1}/5: Round ${ROUND_ID}, ${poolName}...`));
@@ -822,7 +863,7 @@ async function processGovernanceVote(account, idx) {
                     return 'already_voted';
                 }
                 if (simErr.data || reason.includes('revert') || reason.includes('CALL_EXCEPTION')) {
-                    console.log(chalk.yellow(`[Acc ${idx + 1}] Gov vote rejected: ${reason.slice(0, 80)} (may need vault deposit first)`));
+                    console.log(chalk.yellow(`[Acc ${idx + 1}] Gov vote rejected: ${reason.slice(0, 80)}`));
                     return 'not_eligible';
                 }
                 throw simErr;
@@ -846,16 +887,18 @@ async function processGovernanceVote(account, idx) {
 
         if (result.success) {
             if (result.result === 'already_voted') {
-                console.log(chalk.yellow(`[Acc ${idx + 1}] Already voted this round/pool combo`));
+                console.log(chalk.yellow(`[Acc ${idx + 1}] Already voted this pool`));
             } else if (result.result === 'not_eligible') {
-                console.log(chalk.yellow(`[Acc ${idx + 1}] Not eligible to vote yet, skipping governance`));
-                break;
+                notEligibleCount++;
+                if (notEligibleCount >= 3) {
+                    console.log(chalk.yellow(`[Acc ${idx + 1}] Not eligible for any pool, skipping rest`));
+                    break;
+                }
             } else {
                 voteCount++;
             }
         } else {
-            console.log(chalk.yellow(`[Acc ${idx + 1}] Vote ${i + 1} failed, stopping`));
-            break;
+            console.log(chalk.yellow(`[Acc ${idx + 1}] Vote ${i + 1} failed`));
         }
 
         await randomSleep();
@@ -1350,6 +1393,7 @@ async function processDuel(account, idx) {
     }
 
     if (!duelCompleted) {
+        state[idx].duelFailures++;
         state[idx].duelStatus = '❌Fail';
         state[idx].nextDuel = new Date(Date.now() + 4 * 60 * 60 * 1000);
         console.log(chalk.yellow(`[Acc ${idx + 1}] ⏳ Duel failed today. Retrying in 4 hours.`));
